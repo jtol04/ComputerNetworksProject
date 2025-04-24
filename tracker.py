@@ -11,7 +11,8 @@ class Tracker:
         self.next_peer_id = 1
         self.next_match_id = 1 # increment with each match
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.available_peers = []  # Peers not currently playing       
+        self.available_peers = []  # Peers not currently playing
+        self.match_logs = [] # Stores logs for completed matches between peers
         
         # Start matchmaking loop to match peers and run games
         self.matchmaking_thread = threading.Thread(target=self.matchmaking_loop)
@@ -153,6 +154,8 @@ class Tracker:
                 self.available_peers.append(peer_id)
                 print(f"Peer {peer_id} is now available for new matches")
                 print(f"Current available peers: {self.available_peers}")
+
+            # Store the match log
 
     def start(self):
         """

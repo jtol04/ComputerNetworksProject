@@ -1,6 +1,7 @@
 import socket
 import json
 import threading
+import random
 
 class Peer:
     def __init__(self, host='localhost', tracker_port=5000):
@@ -16,6 +17,18 @@ class Peer:
         self.connected = False
         self.peer_id = None
         self.network_peers = {}
+        self.choices = ['rock', 'paper', 'scissors']
+        self.outcomes = {
+            'rockrock': 'tie',
+            'rockpaper': 'lost',
+            'rockscissors': 'win',
+            'paperrock': 'win',
+            'paperpaper': 'tie',
+            'paperscissors': 'lost',
+            'scissorsscissors': 'tie',
+            'scissorsrock': 'lost',
+            'scissorspaper': 'win'
+        }
 
     def handle_peer_connections(self):
         """
@@ -42,6 +55,13 @@ class Peer:
             if not data:
                 break
             print(f"Received peer message: {data}")
+
+    def play_match(self):
+        """
+        Connects to the opponent, sends opponent the choice,
+        receives opponents choice, and finally logs the win or loss
+        """
+        return
 
 
     def listen_for_tracker(self):
@@ -104,6 +124,17 @@ class Peer:
             print(f"Opponent address: {message['opponent_addr']}:{message['opponent_game_port']}")
             
             # TODO: IMPLEMENT BLOCKCHAIN AND GAME LOGIC i.e. broadcasting commits and reveals and mining blocks
+            random_int = random.randint(0, 2)
+            choice = self.choices[random_int]
+
+            game_move_message = {
+                'move': choice
+            }
+
+            # One idea: We can add another thread here, i.e a 'play_match' thread.
+            # It can call some other function ex: play_game() which handles the match
+            # functions. 
+
             self.end_game()
             
     def end_game(self):
