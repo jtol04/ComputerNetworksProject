@@ -4,7 +4,7 @@ import json
 import time
 
 class Tracker:
-    def __init__(self, host='localhost', port=5000):
+    def __init__(self, host='localhost', port=10000):
         self.host = host
         self.port = port
         self.peers = {}
@@ -149,6 +149,7 @@ class Tracker:
         Handle messages from peers
         """
         if message['type'] == 'game_end':
+            # Add peer back to 'available' list
             peer_id = message['peer_id']
             if peer_id not in self.available_peers:
                 self.available_peers.append(peer_id)
@@ -156,6 +157,8 @@ class Tracker:
                 print(f"Current available peers: {self.available_peers}")
 
             # Store the match log
+            self.match_logs.append(message['match_log'])
+            print(f'match log appended')
 
     def start(self):
         """

@@ -2,9 +2,10 @@ import socket
 import json
 import threading
 import random
+import time
 
 class Peer:
-    def __init__(self, host='localhost', tracker_port=5000):
+    def __init__(self, host='localhost', tracker_port=10000):
         """Initialize peer with connection details"""
         self.host = host
         self.tracker_port = tracker_port
@@ -16,6 +17,7 @@ class Peer:
         print(f"Listen Socket bound to port {self.game_port}")
         self.connected = False
         self.peer_id = None
+        self.opponent_id = None
         self.network_peers = {}
         self.choices = ['rock', 'paper', 'scissors']
         self.outcomes = {
@@ -56,12 +58,26 @@ class Peer:
                 break
             print(f"Received peer message: {data}")
 
-    def play_match(self):
+
+    def play_match(self, opponent_addr, opponent_port):
         """
         Connects to the opponent, sends opponent the choice,
         receives opponents choice, and finally logs the win or loss
         """
-        return
+
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.connect((opponent_addr, opponent_port))
+            print(f"Connected to opponent at {opponent_addr}:{opponent_port}")
+
+            move = random.choice(self.choices)
+            message = {"type": "game_move", "move": move}
+            sock.send(json.dumps(message).encode())
+            print(f"Sent move: {move}")
+
+            sock.close()
+        except Exception as e:
+            print(f"Failed to connect or send move: {e}")
 
 
     def listen_for_tracker(self):
@@ -122,18 +138,18 @@ class Peer:
             print(f"Match ID: {message['match_id']}")
             print(f"Opponent ID: {message['opponent_id']}")
             print(f"Opponent address: {message['opponent_addr']}:{message['opponent_game_port']}")
-            
+
+            self.opponent_id = message['opponent_id']
+
             # TODO: IMPLEMENT BLOCKCHAIN AND GAME LOGIC i.e. broadcasting commits and reveals and mining blocks
-            random_int = random.randint(0, 2)
-            choice = self.choices[random_int]
-
-            game_move_message = {
-                'move': choice
-            }
-
             # One idea: We can add another thread here, i.e a 'play_match' thread.
             # It can call some other function ex: play_game() which handles the match
-            # functions. 
+            # functions.
+
+            thread = threading.Thread(target=self.play_match, args=(message['opponent_addr'],
+                                                                    message['opponent_game_port']))
+            thread.daemon = True
+            thread.start()
 
             self.end_game()
             
@@ -146,6 +162,7 @@ class Peer:
         game_result = {
             'type': 'game_end',
             'peer_id': self.peer_id,
+            'match_log': f'peer {self.peer_id} played peer {self.opponent_id} at {time.time()} with result ?'
         }
         self.tracker_socket.send(json.dumps(game_result).encode())
         print("Game ended - sent result to tracker")
