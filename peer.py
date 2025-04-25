@@ -18,6 +18,7 @@ class Peer:
         self.connected = False
         self.peer_id = None
         self.opponent_id = None
+        self.match_result = None
         self.network_peers = {}
         self.choices = ['rock', 'paper', 'scissors']
         self.outcomes = {
@@ -74,6 +75,9 @@ class Peer:
             message = {"type": "game_move", "move": move}
             sock.send(json.dumps(message).encode())
             print(f"Sent move: {move}")
+
+            # TODO: Must parse opponent message (i.e modify handle_peer_message()) ,
+            #  compare choices, compute match result, and log it in self.match_result
 
             sock.close()
         except Exception as e:
