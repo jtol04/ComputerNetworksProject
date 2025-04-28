@@ -3,10 +3,28 @@ import json
 import threading
 import random
 import time
+from blockchain import Blockchain, Block
 
 class Peer:
+    # Constants
+    CHOICES = ['rock', 'paper', 'scissors']
+    OUTCOMES = {
+        'rockrock': 'tie',
+        'rockpaper': 'lost',
+        'rockscissors': 'win',
+        'paperrock': 'win',
+        'paperpaper': 'tie',
+        'paperscissors': 'lost',
+        'scissorsscissors': 'tie',
+        'scissorsrock': 'lost',
+        'scissorspaper': 'win'
+    }
+
     def __init__(self, host='localhost', tracker_port=10000):
-        """Initialize peer with connection details"""
+        """
+        Initialize peer with connection details
+        """
+        # Network connection properties
         self.host = host
         self.tracker_port = tracker_port
         self.tracker_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -14,24 +32,22 @@ class Peer:
         self.listen_socket.bind((host, 0))
         self.game_port = self.listen_socket.getsockname()[1]
         self.listen_socket.listen()
+
         print(f"Listen Socket bound to port {self.game_port}")
+
+        # Connection state
         self.connected = False
         self.peer_id = None
+        self.network_peers = {}
+
+        # Game state
         self.opponent_id = None
         self.match_result = None
-        self.network_peers = {}
-        self.choices = ['rock', 'paper', 'scissors']
-        self.outcomes = {
-            'rockrock': 'tie',
-            'rockpaper': 'lost',
-            'rockscissors': 'win',
-            'paperrock': 'win',
-            'paperpaper': 'tie',
-            'paperscissors': 'lost',
-            'scissorsscissors': 'tie',
-            'scissorsrock': 'lost',
-            'scissorspaper': 'win'
-        }
+
+        # Blocks
+        self.blockchain = Blockchain()
+        self.buffer = []
+
 
     def handle_peer_connections(self):
         """
