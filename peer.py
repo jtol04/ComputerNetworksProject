@@ -1,9 +1,11 @@
+import secrets
 import socket
 import json
 import threading
 import random
 import time
 from blockchain import Blockchain, Block
+from utils import sha256, hash_json
 
 class Peer:
     # Constants
@@ -48,7 +50,6 @@ class Peer:
         self.blockchain = Blockchain()
         self.buffer = []
 
-
     def handle_peer_connections(self):
         """
         Thread to handle incoming peer connections (one thread spins up for each peer)
@@ -76,28 +77,34 @@ class Peer:
             print(f"Received peer message: {data}")
 
 
-    def play_match(self, opponent_addr, opponent_port):
+    def play_match(self, opp_addr, opp_port, match_id):
         """
         Connects to the opponent, sends opponent the choice,
-        receives opponents choice, and finally logs the win or loss
+        Receives opponents choice, and finally logs the win or loss
         """
 
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.connect((opponent_addr, opponent_port))
-            print(f"Connected to opponent at {opponent_addr}:{opponent_port}")
+        move = random.choice(self.CHOICES)
+        key = secrets.token_hex(4)          # 8-char random key
 
-            move = random.choice(self.choices)
-            message = {"type": "game_move", "move": move}
-            sock.send(json.dumps(message).encode())
-            print(f"Sent move: {move}")
+        # COMMIT - hide move
+        commit = {
+            "type": "COMMIT",
+            "match_id": match_id,
+            "peer": self.peer_id,
+            "hash": sha256((move + key).encode()),
+        }
 
-            # TODO: Must parse opponent message (i.e modify handle_peer_message()) ,
-            #  compare choices, compute match result, and log it in self.match_result
+        self.buffer.append(commit)
+        self._send_once(opp_addr, opp_port, commit)
 
-            sock.close()
-        except Exception as e:
-            print(f"Failed to connect or send move: {e}")
+        # wait for opponent commit
+        while not any(
+            t["type"] == "COMMIT" and t["match_id"] == match_id and t["peer"] != self.peer_id
+            for t in self.buffer
+        ):
+            time.sleep(0.05)
+            
+        self.buffer.clear()
 
 
     def listen_for_tracker(self):
@@ -159,19 +166,11 @@ class Peer:
             print(f"Opponent ID: {message['opponent_id']}")
             print(f"Opponent address: {message['opponent_addr']}:{message['opponent_game_port']}")
 
-            self.opponent_id = message['opponent_id']
-
-            # TODO: IMPLEMENT BLOCKCHAIN AND GAME LOGIC i.e. broadcasting commits and reveals and mining blocks
-            # One idea: We can add another thread here, i.e a 'play_match' thread.
-            # It can call some other function ex: play_game() which handles the match
-            # functions.
-
-            thread = threading.Thread(target=self.play_match, args=(message['opponent_addr'],
-                                                                    message['opponent_game_port']))
-            thread.daemon = True
-            thread.start()
-
-            self.end_game()
+            # Start play match thread between peers
+            opp_addr, opp_port = message["opponent_addr"], message["opponent_game_port"]
+            threading.Thread(
+                target=self.play_match, args=(opp_addr, opp_port,  message["match_id"]), daemon=True
+            ).start()
             
     def end_game(self):
         """
