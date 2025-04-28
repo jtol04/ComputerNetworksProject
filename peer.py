@@ -50,6 +50,17 @@ class Peer:
         self.blockchain = Blockchain()
         self.buffer = []
 
+    def _send_once(self, addr, port, obj):
+        """
+        Open a short TCP connection, send once JSON message, close.
+        """
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.connect((addr, port))
+            s.send(json.dumps(obj).encode() + b'\n')
+        finally:
+            s.close()
+
     def handle_peer_connections(self):
         """
         Thread to handle incoming peer connections (one thread spins up for each peer)
@@ -69,12 +80,24 @@ class Peer:
         """
         Handle a message from another peer
         """
+        buffer = ""
         while True:
             print("Reading message from peer...")
-            data = client_socket.recv(1024).decode()
-            if not data:
+            chunk = client_socket.recv(4096).decode()
+            if not chunk:
                 break
-            print(f"Received peer message: {data}")
+            buffer += chunk
+
+            while "\n" in buffer:
+                line, buffer = buffer.split("\n", 1)
+                if not line.strip():
+                    continue
+                msg = json.loads(line)
+
+                # ----- store game transactions -----
+                if msg["type"] in ("COMMIT", "REVEAL", "RESULT"):
+                    self.buffer.append(msg)
+                    print(f"Received peer message: {msg}")
 
 
     def play_match(self, opp_addr, opp_port, match_id):
@@ -103,9 +126,32 @@ class Peer:
             for t in self.buffer
         ):
             time.sleep(0.05)
-            
-        self.buffer.clear()
+        
+        # REVEAL - show move + key
+        reveal = {
+            "type": "REVEAL",
+            "match_id": match_id,
+            "peer": self.peer_id,
+            "move": move,
+            "key": key,
+        }
 
+        self.buffer.append(reveal)
+        self._send_once(opp_addr, opp_port, reveal)
+
+        # wait for opponent reveal
+        while not any(
+            t["type"] == "REVEAL" and t["match_id"] == match_id and t["peer"] != self.peer_id
+            for t in self.buffer
+        ):
+            time.sleep(0.05)
+        opp = next(
+            t
+            for t in self.buffer
+            if t["type"] == "REVEAL" and t["match_id"] == match_id and t["peer"] != self.peer_id
+        )
+
+        self.buffer.clear()
 
     def listen_for_tracker(self):
         """
