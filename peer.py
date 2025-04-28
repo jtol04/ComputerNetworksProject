@@ -46,6 +46,7 @@ class Peer:
         self.opponent_id = None
         self.match_result = None
         self.current_match_id = None
+        self.commits = {}
 
         # Blocks
         self.blockchain = Blockchain()
@@ -61,6 +62,18 @@ class Peer:
             s.send(json.dumps(obj).encode() + b'\n')
         finally:
             s.close()
+    
+    def _clean_buffer(self, block):
+        """
+        Remove transactions from buffer that are already in the blockchain
+        """
+        txids_in_block = {(tx.get("match_id", ""), tx.get("type", ""), tx.get("peer", 0)) 
+                        for tx in block.transactions if "type" in tx}
+    
+        # Keep only transactions not in the block
+        self.buffer = [tx for tx in self.buffer if 
+                    (tx.get("match_id", ""), tx.get("type", ""), tx.get("peer", 0)) 
+                    not in txids_in_block]
 
     def handle_peer_connections(self):
         """
@@ -98,7 +111,31 @@ class Peer:
                 # ----- store game transactions -----
                 if msg["type"] in ("COMMIT", "REVEAL", "RESULT"):
                     self.buffer.append(msg)
+                    if msg["type"] == "COMMIT":
+                        self.commits[(msg["match_id"], msg["peer"])] = msg["hash"]
                     print(f"Received peer message: {msg}")
+
+                elif msg["type"] == "BLOCK_PROPOSAL":
+                    blk = Block.from_json(msg["block"])
+                    is_opponent = self.current_match_id is not None and \
+                        any(t["type"] == "RESULT" and t["match_id"] == self.current_match_id
+                            for t in blk.transactions)
+
+                    print(f"[DEBUG peer] got BLOCK_PROPOSAL for block {blk.index}")
+                    success = self.blockchain.add(blk)
+                    if success:
+                        print(f"[{self.peer_id}] accepted block #{blk.index} {blk.header_hash()[:12]}…")
+                        self.blockchain.print_chain()
+                        
+                        # Clean up transactions already in the blockchain
+                        self._clean_buffer(blk)
+                        
+                        # If this was our current match, end the game
+                        if is_opponent:
+                            self.end_game()
+                            self.current_match_id = None
+                    else:
+                        print(f"[{self.peer_id}] rejected invalid block")
 
 
     def play_match(self, opp_addr, opp_port, match_id):
@@ -106,6 +143,12 @@ class Peer:
         Connects to the opponent, sends opponent the choice,
         Receives opponents choice, and finally logs the win or loss
         """
+        self.opponent_id = next(
+            pid for pid in self.network_peers.keys() 
+            if pid != self.peer_id and 
+                self.network_peers[pid]["address"] == opp_addr and 
+                self.network_peers[pid]["port"] == opp_port
+        )
         self.current_match_id = match_id
         move = random.choice(self.CHOICES)
         key = secrets.token_hex(4)          # 8-char random key
@@ -119,6 +162,7 @@ class Peer:
         }
 
         self.buffer.append(commit)
+        self.commits[(match_id, self.peer_id)] = commit["hash"]
         self._send_once(opp_addr, opp_port, commit)
 
         # wait for opponent commit
@@ -152,6 +196,22 @@ class Peer:
             if t["type"] == "REVEAL" and t["match_id"] == match_id and t["peer"] != self.peer_id
         )
 
+        # RESULT – decide winner
+        outcome = self.OUTCOMES[move + opp["move"]]
+        result = {
+            "type": "RESULT",
+            "match_id": match_id,
+            "winner": self.peer_id
+            if outcome == "win"
+            else opp["peer"]
+            if outcome == "lost"
+            else 0,
+            "tie": outcome == "tie",
+        }
+        self.buffer.append(result)
+
+        print(f"[{self.peer_id}] moves: {move} vs {opp['move']} → {outcome}")
+
         # MINING - both peers mine, first one to finish first broadcasts to opponent to verify
         blk = Block(
             self.blockchain.height() + 1,
@@ -161,13 +221,15 @@ class Peer:
         blk.mine()
         self.blockchain.add(blk)
 
-        # broadcast to every peer we know
+        # broadcast to every peer on network
         for pid, info in self.network_peers.items():
+            if pid == self.peer_id:          # skip myself
+                continue
             self._send_once(info["address"], info["port"],
                 {"type": "BLOCK_PROPOSAL", "block": blk.to_json()})
 
-        print(f"[{self.peer_id}] mined block #{blk.idx} {blk.header_hash()[:12]}…")
-        # we mined a valid block → game finished
+        print(f"[{self.peer_id}] mined block #{blk.index} {blk.header_hash()[:12]}…")
+        # mined a valid block -> game finished
         self.end_game()
 
         self.buffer.clear()
@@ -235,23 +297,12 @@ class Peer:
             print(f"Opponent ID: {message['opponent_id']}")
             print(f"Opponent address: {message['opponent_addr']}:{message['opponent_game_port']}")
 
+            self.opponent_id = message['opponent_id']
             # Start play match thread between peers
             opp_addr, opp_port = message["opponent_addr"], message["opponent_game_port"]
             threading.Thread(
                 target=self.play_match, args=(opp_addr, opp_port,  message["match_id"]), daemon=True
             ).start()
-
-        elif message["type"] == "BLOCK_PROPOSAL":
-            blk = Block.from_json(message["block"])
-            if self.blockchain.add(blk):
-                print(f"[{self.peer_id}] accepted block #{blk.index}")
-                if hasattr(self, "current_match_id") and \
-                    blk.txns[-1]["type"] == "RESULT" and \
-                    blk.txns[-1]["match_id"] == self.current_match_id:
-                    self.end_game()
-                    self.current_match_id = None
-            else:
-                print(f"[{self.peer_id}] rejected invalid block")
         
             
     def end_game(self):
@@ -259,11 +310,26 @@ class Peer:
         End the game and send the result to the tracker
         """
         print("ENDING GAME")
-
+        # Find the match result from the blockchain
+        last_block = self.blockchain.chain[-1]
+        match_result = next(
+            (t for t in last_block.transactions if t["type"] == "RESULT" and t["match_id"] == self.current_match_id),
+            None
+        )
+    
+        result_text = "tie"
+        if match_result:
+            if match_result["winner"] == self.peer_id:
+                result_text = "win"
+            elif match_result["winner"] != 0:
+                result_text = "loss"
+    
         game_result = {
             'type': 'game_end',
             'peer_id': self.peer_id,
-            'match_log': f'peer {self.peer_id} played peer {self.opponent_id} at {time.time()} with result ?'
+            'opponent_id': self.opponent_id,
+            'match_id': self.current_match_id,
+            'match_log': f'peer {self.peer_id} played peer {self.opponent_id} at {time.time()} with result {result_text}'
         }
         self.tracker_socket.send(json.dumps(game_result).encode())
         print("Game ended - sent result to tracker")
