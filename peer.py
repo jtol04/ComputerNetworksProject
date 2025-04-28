@@ -45,6 +45,7 @@ class Peer:
         # Game state
         self.opponent_id = None
         self.match_result = None
+        self.current_match_id = None
 
         # Blocks
         self.blockchain = Blockchain()
@@ -105,7 +106,7 @@ class Peer:
         Connects to the opponent, sends opponent the choice,
         Receives opponents choice, and finally logs the win or loss
         """
-
+        self.current_match_id = match_id
         move = random.choice(self.CHOICES)
         key = secrets.token_hex(4)          # 8-char random key
 
@@ -151,7 +152,23 @@ class Peer:
             if t["type"] == "REVEAL" and t["match_id"] == match_id and t["peer"] != self.peer_id
         )
 
+        # MINING - both peers mine, first one to finish first broadcasts to opponent to verify
+        blk = Block(
+            self.blockchain.height() + 1,
+            self.blockchain.tip(),
+            transactions=self.buffer.copy()
+        )
+        blk.mine()
+        self.blockchain.add(blk)
 
+        # broadcast to every peer we know
+        for pid, info in self.network_peers.items():
+            self._send_once(info["address"], info["port"],
+                {"type": "BLOCK_PROPOSAL", "block": blk.to_json()})
+
+        print(f"[{self.peer_id}] mined block #{blk.idx} {blk.header_hash()[:12]}…")
+        # we mined a valid block → game finished
+        self.end_game()
 
         self.buffer.clear()
 
@@ -223,6 +240,19 @@ class Peer:
             threading.Thread(
                 target=self.play_match, args=(opp_addr, opp_port,  message["match_id"]), daemon=True
             ).start()
+
+        elif message["type"] == "BLOCK_PROPOSAL":
+            blk = Block.from_json(message["block"])
+            if self.blockchain.add(blk):
+                print(f"[{self.peer_id}] accepted block #{blk.index}")
+                if hasattr(self, "current_match_id") and \
+                    blk.txns[-1]["type"] == "RESULT" and \
+                    blk.txns[-1]["match_id"] == self.current_match_id:
+                    self.end_game()
+                    self.current_match_id = None
+            else:
+                print(f"[{self.peer_id}] rejected invalid block")
+        
             
     def end_game(self):
         """
