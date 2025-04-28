@@ -151,19 +151,25 @@ class Peer:
             if t["type"] == "REVEAL" and t["match_id"] == match_id and t["peer"] != self.peer_id
         )
 
+
+
         self.buffer.clear()
 
     def listen_for_tracker(self):
         """
         Thread to listen for messages from the tracker
         """
+        buffer = ""
         while self.connected:
-            data = self.tracker_socket.recv(1024).decode()
-            if not data:
+            chunk = self.tracker_socket.recv(4096).decode()
+            if not chunk:            # i.e tracker closed
                 break
-            message = json.loads(data)
-            self.handle_tracker_message(message)
-
+            buffer += chunk
+            # process one line at a time
+            while "\n" in buffer:
+                line, buffer = buffer.split("\n", 1)
+                if line.strip():
+                    self.handle_tracker_message(json.loads(line))
 
     def connect_to_tracker(self):
         """

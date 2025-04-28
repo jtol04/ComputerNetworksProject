@@ -6,11 +6,9 @@ from flask import Flask, jsonify
 
 flask_app = Flask(__name__)
 
-
 @flask_app.route('/logs', methods=['GET'])
 def get_logs():
     return jsonify(tracker.match_logs)
-
 
 class Tracker:
     def __init__(self, host='localhost', port=10000):
@@ -77,7 +75,7 @@ class Tracker:
         """
         Send a message to a specific peer
         """
-        self.peers[peer_id]['socket'].send(json.dumps(message).encode())
+        self.peers[peer_id]['socket'].send(json.dumps(message).encode() + b'\n')
         print(f"Message sent to peer {peer_id}")
 
     def broadcast_network_update(self):
@@ -126,7 +124,7 @@ class Tracker:
             'peer_id': peer_id
         }
 
-        client_socket.send(json.dumps(response).encode())
+        client_socket.send(json.dumps(response).encode() + b'\n')
 
         self.available_peers.append(peer_id)
         print(f"Added peer {peer_id} to available_peers list. Current available: {self.available_peers}")
