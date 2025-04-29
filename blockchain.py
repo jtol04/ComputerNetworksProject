@@ -137,6 +137,7 @@ class Blockchain:
             return False
 
         # case 2: fork of depth-1
+
         if len(self.chain) >= 2 and blk.prev == self.chain[-2].header_hash():
             print("  trying case2 fork")
             if not self._valid(blk, self.chain[-2]):
@@ -149,7 +150,7 @@ class Blockchain:
                 print("  -> case2 valid but worse PoW, keep old tip")
             return True
 
-        print("  -> no matching case, reject")
+        print("  -> no matching case, fork detected! requesting complete chain from neighbor")
         return False
 
     # for debugging

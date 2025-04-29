@@ -116,6 +116,7 @@ class Peer:
                     print(f"Received peer message: {msg}")
 
                 elif msg["type"] == "BLOCK_PROPOSAL":
+                    sender = msg["peer"]
                     blk = Block.from_json(msg["block"])
                     is_opponent = self.current_match_id is not None and \
                         any(t["type"] == "RESULT" and t["match_id"] == self.current_match_id
@@ -135,7 +136,55 @@ class Peer:
                             self.end_game()
                             self.current_match_id = None
                     else:
-                        print(f"[{self.peer_id}] rejected invalid block")
+                        print(f"[{self.peer_id}] rejected invalid block. Requesting full chain.")
+                        self.request_full_chain(sender)
+                        self.blockchain.print_chain()
+
+
+                elif msg["type"] == "CHAIN_REQUEST":
+                    chain_json = [blk.to_json() for blk in self.blockchain.chain]
+                    response = {
+                        "type": "CHAIN_RESPONSE",
+                        "chain": chain_json,
+                        "from_peer": self.peer_id
+                        }
+                    addr = msg["reply_addr"]
+                    port = msg["reply_port"]
+                    self._send_once(addr, port, response)
+                
+                elif msg["type"] == "CHAIN_RESPONSE":
+                    # peer sent their chain
+                    new_chain = []
+                    for blk_json in msg["chain"]:
+                        new_chain.append(Block.from_json(blk_json))
+                    if self._validate_full_chain(new_chain):
+                        print(f"[{self.peer_id}] adopting chain of length {len(new_chain)}")
+                        self.blockchain.chain = new_chain
+                        for blk in new_chain:
+                            self._clean_buffer(blk)
+                    else:
+                        print("[ERROR] received chain was invalid; ignoring")
+
+    def _validate_full_chain(self, chain):
+        """
+        TODO: implement validation checking for neighbor's full
+        """
+ 
+        return True
+    
+    def request_full_chain(self, target_peer_id):
+        """
+        Ask target peer to send their complete and correct blockchain
+        """
+        info = self.network_peers[target_peer_id]
+        request = {
+            "type": "CHAIN_REQUEST",
+            "from_peer": self.peer_id,
+            "reply_addr": self.host,
+            "reply_port": self.game_port
+        }
+        self._send_once(info["address"], info["port"], request)
+    
 
 
     def play_match(self, opp_addr, opp_port, match_id):
@@ -226,7 +275,7 @@ class Peer:
             if pid == self.peer_id:          # skip myself
                 continue
             self._send_once(info["address"], info["port"],
-                {"type": "BLOCK_PROPOSAL", "block": blk.to_json()})
+                {"type": "BLOCK_PROPOSAL", "peer": self.peer_id, "block": blk.to_json()})
 
         print(f"[{self.peer_id}] mined block #{blk.index} {blk.header_hash()[:12]}…")
         # mined a valid block -> game finished
@@ -333,6 +382,7 @@ class Peer:
         }
         self.tracker_socket.send(json.dumps(game_result).encode())
         print("Game ended - sent result to tracker")
+
     
 
 if __name__ == "__main__":

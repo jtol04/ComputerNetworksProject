@@ -33,20 +33,24 @@ class Tracker:
 
         while True:
             print(f"MATCHMAKING CHECK - Available peers: {self.available_peers}")
-            if len(self.available_peers) >= 2:
+            matches = []
+            while len(self.available_peers) >= 2:
                 print(f"Found enough peers! Starting to match from: {self.available_peers}")
+                peer1_id = self.available_peers.pop(0)
+                peer2_id = self.available_peers.pop(0)
 
-                while len(self.available_peers) >= 2:
-                    peer1_id = self.available_peers.pop(0)
-                    peer2_id = self.available_peers.pop(0)
+                match_id = f"match_{self.next_match_id}"
+                self.next_match_id += 1
+                matches.append((peer1_id, peer2_id, match_id))
 
-                    match_id = f"match_{self.next_match_id}"
-                    print(f"Creating match between peers {peer1_id} and {peer2_id} with id {self.next_match_id}")
-                    self.next_match_id += 1
-                    print(f"Starting match {match_id}")
-                    self.start_match(peer1_id, peer2_id, match_id)
+            for peer1_id, peer2_id, match_id in matches:     
+                print(f"Creating match between peers {peer1_id} and {peer2_id} with id {match_id}")
+                t = threading.Thread(target=self.start_match,
+                    args=(peer1_id, peer2_id, match_id),
+                    daemon=True)
+                t.start()
 
-            time.sleep(3)
+            time.sleep(10)
 
     def start_match(self, peer1_id, peer2_id, match_id):
         """
