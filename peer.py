@@ -5,7 +5,7 @@ import threading
 import random
 import time
 from blockchain import Blockchain, Block
-from utils import sha256, hash_json
+from utils import sha256, hash_json, pow_ok
 
 class Peer:
     # Constants
@@ -118,18 +118,24 @@ class Peer:
                 elif msg["type"] == "BLOCK_PROPOSAL":
                     sender = msg["peer"]
                     blk = Block.from_json(msg["block"])
+
+                    if not self.self_check():
+                        print(f"[{self.peer_id}] detected local chain error; syncing first")
+                        self.request_full_chain(sender)
+                    
+                    print(f"[{self.peer_id}] no local chain error")
+                        
                     is_opponent = self.current_match_id is not None and \
                         any(t["type"] == "RESULT" and t["match_id"] == self.current_match_id
                             for t in blk.transactions)
 
-                    print(f"[DEBUG peer] got BLOCK_PROPOSAL for block {blk.index}")
+                    print(f"[DEBUG peer] got BLOCK_PROPOSAL for block {blk.index} from {sender}")
                     success = self.blockchain.add(blk)
                     if success:
-                        print(f"[{self.peer_id}] accepted block #{blk.index} {blk.header_hash()[:12]}…")
-                        self.blockchain.print_chain()
-                        
+                        print(f"[{self.peer_id}] accepted block #{blk.index} {blk.header_hash()[:12]}… from {sender}")                
                         # Clean up transactions already in the blockchain
                         self._clean_buffer(blk)
+                        self.blockchain.print_chain()
                         
                         # If this was our current match, end the game
                         if is_opponent:
@@ -155,21 +161,52 @@ class Peer:
                 elif msg["type"] == "CHAIN_RESPONSE":
                     # peer sent their chain
                     new_chain = []
+                    sender = msg["from_peer"]
                     for blk_json in msg["chain"]:
                         new_chain.append(Block.from_json(blk_json))
                     if self._validate_full_chain(new_chain):
-                        print(f"[{self.peer_id}] adopting chain of length {len(new_chain)}")
+                        print(f"[{self.peer_id}] adopting chain of length {len(new_chain)} from {sender}")
                         self.blockchain.chain = new_chain
                         for blk in new_chain:
                             self._clean_buffer(blk)
+                            
                     else:
                         print("[ERROR] received chain was invalid; ignoring")
 
+    def self_check(self):
+        """
+        Detect errors in the node’s local blockchain (e.g. a shorter blockchain, duplicate blocks, 
+        etxra blocks)
+        """
+        for i in range(1, len(self.blockchain.chain)):
+            #check index
+            if self.blockchain.chain[i].index != i:
+                return False
+            #check hash
+            if self.blockchain.chain[i].prev != self.blockchain.chain[i-1].header_hash():
+                return False
+            #check proof of work
+            if not pow_ok(self.blockchain.chain[i].header_hash()):
+                return False
+
+        hashes = [blk.header_hash() for blk in self.blockchain.chain]
+        if len(hashes) != len(set(hashes)):
+            return False
+        
+        return True
+
+
     def _validate_full_chain(self, chain):
         """
-        TODO: implement validation checking for neighbor's full
+        TODO: implement validation checking for neighbor's full chain
         """
- 
+
+        """
+        for i in range(1, len(chain)):
+            if not self.blockchain._valid(chain[i], chain[i-1]):
+                return False
+
+        """
         return True
     
     def request_full_chain(self, target_peer_id):
@@ -261,24 +298,28 @@ class Peer:
 
         print(f"[{self.peer_id}] moves: {move} vs {opp['move']} → {outcome}")
 
-        # MINING - both peers mine, first one to finish first broadcasts to opponent to verify
-        blk = Block(
-            self.blockchain.height() + 1,
-            self.blockchain.tip(),
-            transactions=self.buffer.copy()
-        )
-        blk.mine()
-        self.blockchain.add(blk)
+        if (self.peer_id < self.opponent_id):
+            # MINING - both peers mine, first one to finish first broadcasts to opponent to verify
+            blk = Block(
+                self.blockchain.height() + 1,
+                self.blockchain.tip(),
+                transactions=self.buffer.copy()
+            )
+            blk.mine()  # busy‐loop incrementing nonce until pow_ok()
+            self.blockchain.add(blk)
 
-        # broadcast to every peer on network
-        for pid, info in self.network_peers.items():
-            if pid == self.peer_id:          # skip myself
-                continue
-            self._send_once(info["address"], info["port"],
-                {"type": "BLOCK_PROPOSAL", "peer": self.peer_id, "block": blk.to_json()})
+            # broadcast to every peer on network
+            for pid, info in self.network_peers.items():
+                if pid == self.peer_id:          # skip myself
+                    continue
+                self._send_once(info["address"], info["port"],
+                    {"type": "BLOCK_PROPOSAL", "peer": self.peer_id, "block": blk.to_json()})
 
-        print(f"[{self.peer_id}] mined block #{blk.index} {blk.header_hash()[:12]}…")
-        # mined a valid block -> game finished
+            print(f"[{self.peer_id}] mined block #{blk.index} {blk.header_hash()[:12]}…")
+            self.blockchain.print_chain()
+            
+            # mined a valid block -> game finished
+        
         self.end_game()
 
         self.buffer.clear()
