@@ -50,7 +50,7 @@ class Tracker:
                     daemon=True)
                 t.start()
 
-            time.sleep(10)
+            time.sleep(15)
 
     def start_match(self, peer1_id, peer2_id, match_id):
         """
