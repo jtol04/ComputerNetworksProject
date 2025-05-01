@@ -6,6 +6,7 @@ import random
 import time
 from blockchain import Blockchain, Block
 from utils import sha256, hash_json, pow_ok
+from threading import Condition
 
 class Peer:
     # Constants
@@ -54,6 +55,7 @@ class Peer:
         self.pending = []
         self.lock = threading.Lock()
         self.should_broadcast = True
+        self.cond = Condition()
 
     def _send_once(self, addr, port, obj):
         """
@@ -121,53 +123,54 @@ class Peer:
                 elif msg["type"] == "BLOCK_PROPOSAL":
                     sender = msg["peer"]
                     blk = Block.from_json(msg["block"])
+                    self.should_broadcast = False
 
-                    with self.lock:
-                        self.should_broadcast = False
+                    # check if block proposal is from match oppoent
+                    is_opponent = self.current_match_id is not None and \
+                        any(t["type"] == "RESULT" and t["match_id"] == self.current_match_id
+                            for t in blk.transactions)
 
-                        if not self.self_check():
-                            print(f"[{self.peer_id}] detected local chain error; syncing first")
-                            self.request_full_chain(sender)
-                        
-                        print(f"[{self.peer_id}] no local chain error")
-                            
-                        is_opponent = self.current_match_id is not None and \
-                            any(t["type"] == "RESULT" and t["match_id"] == self.current_match_id
-                                for t in blk.transactions)
+                    print(f"[DEBUG peer] got BLOCK_PROPOSAL for block {blk.index} from {sender}")    
+                    
+                    with self.cond:
+                        # let any waiting miner see “should_broadcast = False”:
+                        self.cond.notify_all()
 
-                        print(f"[DEBUG peer] got BLOCK_PROPOSAL for block {blk.index} from {sender}")
-                        
-                        success = self.blockchain.add(blk)
-                        if success:
-                            print(f"[{self.peer_id}] added block #{blk.index} {blk.header_hash()[:12]}… from {sender}")                
-                            # Clean up transactions already in the blockchain
-                            self._clean_buffer(blk)
+                        self.blockchain.add(blk)
+                        self._clean_buffer(blk)
+                        self.blockchain.print_chain()
+
+                        if is_opponent:
+                            self.end_game()
+                            self.current_match_id = None
+
+
+                        # wait for pending blocks
+                        got_pending = self.cond.wait_for(lambda: bool(self.pending), timeout=0.2)
+
+                        if not got_pending:
+                            print(f"[{self.peer_id}] no pending blocks to replay")
+                        else:
+                            # remine pending block
+                            pending_blk = self.pending.pop(0)
+                            pending_blk.index = self.blockchain.height() + 1
+                            pending_blk.prev  = self.blockchain.tip()
+                            pending_blk.nonce = 0
+                            pending_blk.mine()
+
+                            print(f"[{self.peer_id}] remined pending blk #{pending_blk.index}")
+                            self.blockchain.add(pending_blk)
                             self.blockchain.print_chain()
-                            
-                            # If this was our current match, end the game
-                            if is_opponent:
-                                self.end_game()
-                                self.current_match_id = None
-                        else:
-                            print(f"[{self.peer_id}] rejected invalid block. No new blocks added.")
+                            self._clean_buffer(pending_blk)
 
-                        if not self.pending:
-                            print(f"[{self.peer_id}] no pending blocks")
-                        else:
-                            while self.pending:
-                                pending_blk = self.pending.pop(0)
-                                # re-anchor on the new tip
-                                pending_blk.prev = self.blockchain.tip()
-                                pending_blk.nonce = 0
-                                pending_blk.mine()
-                                self.blockchain.add(pending_blk)
-                                self._clean_buffer(pending_blk)
-                                for pid, info in self.network_peers.items():
-                                    if pid == self.peer_id:          # skip myself
-                                        continue
-                                    self._send_once(info["address"], info["port"],
-                                        {"type": "BLOCK_PROPOSAL", "peer": self.peer_id, "block": pending_blk.to_json()})
-                                
+                            # broadcast the remined block
+                            for pid, info in self.network_peers.items():
+                                if pid == self.peer_id: continue
+                                self._send_once(
+                                    info["address"], info["port"],
+                                    {"type":"BLOCK_PROPOSAL","peer":self.peer_id,"block":pending_blk.to_json()}
+                                )
+
                         
 
                 elif msg["type"] == "CHAIN_REQUEST":
@@ -226,12 +229,6 @@ class Peer:
         TODO: implement validation checking for neighbor's full chain
         """
 
-        """
-        for i in range(1, len(chain)):
-            if not self.blockchain._valid(chain[i], chain[i-1]):
-                return False
-
-        """
         return True
     
     def request_full_chain(self, target_peer_id):
@@ -329,6 +326,7 @@ class Peer:
 
         # MINING - lower peer ID mines the block
         if (self.peer_id < self.opponent_id):
+            stored_height = self.blockchain.height() + 1
             blk = Block(
                 self.blockchain.height() + 1,
                 self.blockchain.tip(),
@@ -337,19 +335,29 @@ class Peer:
             blk.mine()  # busy‐loop incrementing nonce until pow_ok()
             print(f"[{self.peer_id}] mined block #{blk.index} {blk.header_hash()[:12]}…")
 
-            with self.lock:
+            with self.cond:
                 if self.should_broadcast:
-                    self.blockchain.add(blk)
-                    print(f"Block {blk.index} added to blockchain")
+                    # no propposals received yet. broadcast to all peers
+                    print(f"No proposals received. Broadcasting to peers.")
                     for pid, info in self.network_peers.items():
                         if pid == self.peer_id:          # skip myself
                             continue
                         self._send_once(info["address"], info["port"],
                             {"type": "BLOCK_PROPOSAL", "peer": self.peer_id, "block": blk.to_json()})
-                else:
-                    print(f"[{self.peer_id}] delayed broadcast")
+                        
+                continue_mining = self.cond.wait_for(lambda: not self.should_broadcast, timeout=0.2)
+
+                if continue_mining:
+                    # someone else broadcasted first. need to remine.
+                    print(f"[{self.peer_id}] added block #{blk.index} to pending block list")
                     self.pending.append(blk)
-            
+                    # let the handler know it can wake up immediately
+                    self.cond.notify_all()
+                else:
+                    # broadcasted first and no further mining needed
+                    print(f"[{self.peer_id}] broadcased first. adding block #{blk.index} to local chain")
+                    self.blockchain.add(blk)
+
             
         self.end_game()
         self.buffer.clear()
