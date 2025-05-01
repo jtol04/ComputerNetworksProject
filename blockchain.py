@@ -146,9 +146,10 @@ class Blockchain:
             if blk.header_hash() < tip.header_hash():
                 print("  -> case2 valid & better PoW, reorganize")
                 self.chain[-1] = blk
+                return True
             else:
                 print("  -> case2 valid but worse PoW, keep old tip")
-            return True
+                return False
 
 
         print("  -> no matching case")
