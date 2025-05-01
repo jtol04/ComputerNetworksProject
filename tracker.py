@@ -3,6 +3,9 @@ import threading
 import json
 import time
 from flask import Flask, jsonify
+from global_vars import TRACKER_PORT
+import random
+
 
 flask_app = Flask(__name__)
 
@@ -10,11 +13,16 @@ flask_app = Flask(__name__)
 def get_logs():
     return jsonify(tracker.match_logs)
 
+@flask_app.route('/chains', methods=['GET'])
+def get_chains():
+    return jsonify(tracker.per_peer_chains)
+
 class Tracker:
-    def __init__(self, host='localhost', port=10000):
+    def __init__(self, host='localhost', port=TRACKER_PORT):
         self.host = host
         self.port = port
         self.peers = {}
+        self.per_peer_chains = {} #Tracks each peers local blockchain
         self.next_peer_id = 1
         self.next_match_id = 1  # increment with each match
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -34,6 +42,7 @@ class Tracker:
         while True:
             print(f"MATCHMAKING CHECK - Available peers: {self.available_peers}")
             matches = []
+            random.shuffle(self.available_peers)
             while len(self.available_peers) >= 2:
                 print(f"Found enough peers! Starting to match from: {self.available_peers}")
                 peer1_id = self.available_peers.pop(0)
@@ -50,7 +59,7 @@ class Tracker:
                     daemon=True)
                 t.start()
 
-            time.sleep(20)
+            time.sleep(10)
 
     def start_match(self, peer1_id, peer2_id, match_id):
         """
@@ -79,7 +88,7 @@ class Tracker:
         """
         Send a message to a specific peer
         """
-        self.peers[peer_id]['socket'].send(json.dumps(message).encode() + b'\n')
+        self.peers[peer_id]['socket'].sendall(json.dumps(message).encode() + b'\n')
         print(f"Message sent to peer {peer_id}")
 
     def broadcast_network_update(self):
@@ -135,14 +144,19 @@ class Tracker:
 
         self.broadcast_network_update()
 
+        buffer = ""
         try:
             while True:
-                data = client_socket.recv(1024).decode()
-                if not data:
+                chunk = client_socket.recv(1024).decode()
+                if not chunk:
                     break
+                buffer += chunk
 
-                message = json.loads(data)
-                self.handle_peer_message(peer_id, message)
+                while "\n" in buffer:
+                    line, buffer = buffer.split("\n", 1)
+                    if line.strip():  # avoid empty lines
+                        message = json.loads(line)
+                        self.handle_peer_message(peer_id, message)
 
         except Exception as e:
             print(f"Error handling peer {peer_id}: {e}")
@@ -159,6 +173,11 @@ class Tracker:
         """
         Handle messages from peers
         """
+        # Store the local blockchain from a peer
+        if message['type'] == 'blockchain_update':
+            print(f"Got local blockchain from peer {peer_id}")
+            self.per_peer_chains[message['peer_id']] = message['local_blockchain']
+
         if message['type'] == 'game_end':
             # Add peer back to 'available' list
             peer_id = message['peer_id']
@@ -199,4 +218,4 @@ if __name__ == "__main__":
     threading.Thread(target=tracker.start, daemon=True).start()
 
     # So we can host the endpoint
-    flask_app.run(port=10001)
+    flask_app.run(port=9000)

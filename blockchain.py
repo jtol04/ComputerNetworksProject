@@ -137,7 +137,6 @@ class Blockchain:
             return False
 
         # case 2: fork of depth-1
-
         if len(self.chain) >= 2 and blk.prev == self.chain[-2].header_hash():
             # block’s prev points to the second‐to‐last block in your chain (i.e. it “skipped” the current tip).
             print("  trying case 2: fork of depth 1 detected")
