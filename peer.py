@@ -123,19 +123,19 @@ class Peer:
                 elif msg["type"] == "BLOCK_PROPOSAL":
                     sender = msg["peer"]
                     blk = Block.from_json(msg["block"])
-                    self.should_broadcast = False
-
+                   
                     # check if block proposal is from match oppoent
                     is_opponent = self.current_match_id is not None and \
                         any(t["type"] == "RESULT" and t["match_id"] == self.current_match_id
                             for t in blk.transactions)
 
-                    print(f"[DEBUG peer] got BLOCK_PROPOSAL for block {blk.index} from {sender}")    
+                    print(f"[DEBUG peer] got BLOCK_PROPOSAL for block {blk.index} from {sender}")
                     
+                    # grab the lock
                     with self.cond:
-                        # let any waiting miner see “should_broadcast = False”:
-                        self.cond.notify_all()
-
+                        self.should_broadcast = False
+                        
+                        # add block proposal to local block chain
                         self.blockchain.add(blk)
                         self._clean_buffer(blk)
                         self.blockchain.print_chain()
@@ -144,33 +144,33 @@ class Peer:
                             self.end_game()
                             self.current_match_id = None
 
-
-                        # wait for pending blocks
-                        got_pending = self.cond.wait_for(lambda: bool(self.pending), timeout=0.2)
+                        # ensure there arent any pending blocks
+                        got_pending = self.cond.wait_for(lambda: bool(self.pending), timeout=0.3)
 
                         if not got_pending:
-                            print(f"[{self.peer_id}] no pending blocks to replay")
+                            print(f"[{self.peer_id}] no pending blocks to remine")
                         else:
                             # remine pending block
                             pending_blk = self.pending.pop(0)
+                            old_index = pending_blk.index
                             pending_blk.index = self.blockchain.height() + 1
                             pending_blk.prev  = self.blockchain.tip()
                             pending_blk.nonce = 0
                             pending_blk.mine()
 
-                            print(f"[{self.peer_id}] remined pending blk #{pending_blk.index}")
+                            print(f"[{self.peer_id}] remined pending blk #{old_index} to new blk #{pending_blk.index}")
                             self.blockchain.add(pending_blk)
                             self.blockchain.print_chain()
                             self._clean_buffer(pending_blk)
 
                             # broadcast the remined block
+                            print(f"[{self.peer_id}] broadcasting to peers blk #{pending_blk.index}")
                             for pid, info in self.network_peers.items():
                                 if pid == self.peer_id: continue
                                 self._send_once(
                                     info["address"], info["port"],
                                     {"type":"BLOCK_PROPOSAL","peer":self.peer_id,"block":pending_blk.to_json()}
                                 )
-
                         
 
                 elif msg["type"] == "CHAIN_REQUEST":
@@ -190,16 +190,14 @@ class Peer:
                     sender = msg["from_peer"]
                     for blk_json in msg["chain"]:
                         new_chain.append(Block.from_json(blk_json))
-                    if self._validate_full_chain(new_chain):
-                        print(f"[{self.peer_id}] adopting chain of length {len(new_chain)} from {sender}")
-                        self.blockchain.chain = new_chain
+                    
+                    print(f"[{self.peer_id}] adopting chain of length {len(new_chain)} from {sender}")
+                    self.blockchain.chain = new_chain
 
-                        # need to double check cleaning the buffer
-                        for blk in new_chain:
-                            self._clean_buffer(blk)
+                    # need to double check cleaning the buffer
+                    for blk in new_chain:
+                        self._clean_buffer(blk)
                             
-                    else:
-                        print("[ERROR] received chain was invalid; ignoring")
 
     def self_check(self):
         """
@@ -224,16 +222,10 @@ class Peer:
         return True
 
 
-    def _validate_full_chain(self, chain):
-        """
-        TODO: implement validation checking for neighbor's full chain
-        """
-
-        return True
     
     def request_full_chain(self, target_peer_id):
         """
-        Ask target peer to send their complete and correct blockchain
+        Ask peer with longest chain to send their blockchain
         """
         info = self.network_peers[target_peer_id]
         request = {
@@ -335,8 +327,10 @@ class Peer:
             blk.mine()  # busy‐loop incrementing nonce until pow_ok()
             print(f"[{self.peer_id}] mined block #{blk.index} {blk.header_hash()[:12]}…")
 
+            #grab the lock
             with self.cond:
                 if self.should_broadcast:
+                    # check if should_broadcast has been set to false, for a max of 0.2s
                     # no propposals received yet. broadcast to all peers
                     print(f"No proposals received. Broadcasting to peers.")
                     for pid, info in self.network_peers.items():
@@ -344,19 +338,16 @@ class Peer:
                             continue
                         self._send_once(info["address"], info["port"],
                             {"type": "BLOCK_PROPOSAL", "peer": self.peer_id, "block": blk.to_json()})
-                        
-                continue_mining = self.cond.wait_for(lambda: not self.should_broadcast, timeout=0.2)
-
-                if continue_mining:
+                    
+                    print(f"[{self.peer_id}] broadcased first. adding block #{blk.index} to local chain")
+                    self.blockchain.add(blk)
+                else:
                     # someone else broadcasted first. need to remine.
                     print(f"[{self.peer_id}] added block #{blk.index} to pending block list")
                     self.pending.append(blk)
                     # let the handler know it can wake up immediately
                     self.cond.notify_all()
-                else:
-                    # broadcasted first and no further mining needed
-                    print(f"[{self.peer_id}] broadcased first. adding block #{blk.index} to local chain")
-                    self.blockchain.add(blk)
+                   
 
             
         self.end_game()
