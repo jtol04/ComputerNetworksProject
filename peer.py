@@ -139,7 +139,7 @@ class Peer:
                         # add block proposal to local block chain
                         self.blockchain.add(blk)
                         self._clean_buffer(blk)
-                        self.blockchain.print_chain()
+                        #self.blockchain.print_chain()
 
                         if is_opponent:
                             self.end_game()
@@ -161,7 +161,7 @@ class Peer:
 
                             print(f"[{self.peer_id}] remined pending blk #{old_index} to new blk #{pending_blk.index}")
                             self.blockchain.add(pending_blk)
-                            self.blockchain.print_chain()
+                            #self.blockchain.print_chain()
                             self._clean_buffer(pending_blk)
 
                             # broadcast the remined block
@@ -240,7 +240,7 @@ class Peer:
         Receives opponents choice, and finally logs the win or loss
         """
 
-        self.blockchain.print_chain()
+        #self.blockchain.print_chain()
         self.should_broadcast = True
 
         self.opponent_id = next(

@@ -16,6 +16,7 @@ class Block:
             "index": self.index,
             "prev": self.prev,
             # "root": 0,       # add later for merkle
+            "transactions": self.transactions,
             "timestamp": self.timestamp,
             "nonce": self.nonce
         }
@@ -149,8 +150,9 @@ class Blockchain:
                 return True
             else:
                 print("  -> case2 valid but worse PoW, keep old tip")
-                return False
+            return False
         print("  -> no matching case")
+
         return False
 
     # for debugging
