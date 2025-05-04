@@ -5,119 +5,129 @@
   <title>Peer Blockchains</title>
   <script src="https://d3js.org/d3.v7.min.js"></script>
   <style>
-    body { margin:0; font-family:sans-serif }
-    h2   { text-align: center; margin: 16px 0; }
-
-    #canvas-container {
-      height: 90vh;
-      overflow-y: auto;     /* vertical scroll bar when content overflows */
-      background: #f9f9f9;
+    body { margin:0; font-family:sans-serif; display:flex; height:100vh; }
+    #canvas-container { flex:1; overflow-y:auto; background:#f9f9f9; }
+    #leaderboard {
+      width:200px;
+      border-left:1px solid #ccc;
+      padding:10px;
+      overflow-y:auto;
+      background:#fff;
     }
-
-    /* SVG will be as tall as we set in JS */
-    svg {
-      width: 100%;
-      display: block; /* avoid inline-SVG whitespace */
-    }
-
-    .block   { stroke: #333; stroke-width: 1; cursor: pointer; }
-    .label   { font-size: 12px; fill: #333; }
-    .win     { fill: #b2f2bb; }
-    .loss    { fill: #ffa8a8; }
-    .tie     { fill: #d0ebff; }
-    .unknown { fill: #e0e0e0; }
+    h2,h3 { margin:8px 0; text-align:center }
+    svg { width:100%; display:block }
+    .block { stroke:#333; stroke-width:1; cursor:pointer }
+    .label { font-size:12px; fill:#333 }
+    .win   { fill:#b2f2bb }
+    .loss  { fill:#ffa8a8 } /* was gonna use this but decided against it */
+    .tie   { fill:#d0ebff }
+    .unknown { fill:#e0e0e0 }
   </style>
 </head>
 <body>
-  <h2>Blockchain Per Peer</h2>
   <div id="canvas-container">
+    <h2>Blockchain Per Peer</h2>
     <svg id="canvas"></svg>
+  </div>
+  <div id="leaderboard">
+    <h3>Leaderboard</h3>
+    <ol id="lb-list"></ol>
   </div>
 
   <script>
     const svg       = d3.select("#canvas");
-    const container = document.getElementById("canvas-container");
     const colWidth  = 200;
     const blockH    = 60;
     const topMargin = 50;
 
     function getBlockColor(block) {
       const txs    = block.transactions || [];
-      const result = txs.find(t => t.type === "RESULT");
+      const result = txs.find(t => t.type==="RESULT");
       if (!result) return "unknown";
       if (result.tie) return "tie";
-      return result.winner === 0 ? "tie" : "win";
+      return result.winner===0 ? "tie" : "win";
     }
 
     function renderChains(chains) {
       svg.selectAll("*").remove();
-
-      // find the longest chain length
       const peerIds = Object.keys(chains);
       let maxLen = 0;
-      peerIds.forEach(id => {
-        maxLen = Math.max(maxLen, chains[id].length);
-      });
+      peerIds.forEach(id => { maxLen = Math.max(maxLen, chains[id].length); });
+      svg.attr("height", topMargin + maxLen*blockH + 20);
 
-      // set the SVG height so content will overflow container if too tall
-      const neededHeight = topMargin + maxLen * blockH + 20;
-      svg.attr("height", neededHeight);
+      const winCounts = {};
+      peerIds.forEach(id => winCounts[id]=0);
 
       peerIds.forEach((peerId, col) => {
         const chain = chains[peerId];
 
-        // peer label
         svg.append("text")
-          .attr("x", col * colWidth + 10)
+          .attr("x", col*colWidth+10)
           .attr("y", 20)
           .text(`Peer ${peerId}`)
-          .attr("class", "label");
+          .attr("class","label");
 
-        // blocks
-        chain.forEach((blockJson, row) => {
-          const block = typeof blockJson === "string"
+        chain.forEach((blockJson,row) => {
+          const block = (typeof blockJson==="string")
                       ? JSON.parse(blockJson)
                       : blockJson;
-          const y = topMargin + row * blockH;
-
+          const y = topMargin + row*blockH;
           const g = svg.append("g")
-            .attr("transform", `translate(${col * colWidth + 10},${y})`);
-
+            .attr("transform",`translate(${col*colWidth+10},${y})`);
           const cls = getBlockColor(block);
+          if (cls==="win") winCounts[peerId]++;
 
           g.append("rect")
-            .attr("width", 150)
-            .attr("height", 0)
-            .attr("class", `block ${cls}`)
+            .attr("width",150)
+            .attr("height",0)
+            .attr("class",`block ${cls}`)
             .transition().duration(300)
-            .attr("height", blockH - 10);
+            .attr("height",blockH-10);
 
           g.append("text")
-            .attr("x", 5).attr("y", 20)
-            .attr("class", "label")
+            .attr("x",5).attr("y",20)
+            .attr("class","label")
             .text(`#${block.header.index}`);
 
           g.append("text")
-            .attr("x", 5).attr("y", 40)
-            .attr("class", "label")
-            .text(`Txs: ${block.transactions.length}`);
+            .attr("x",5).attr("y",40)
+            .attr("class","label")
+            .text(
+              `Match IDs: ${
+                Array.from(
+                  new Set(
+                    block.transactions
+                      .map(tx=>tx.match_id)
+                      .filter(id=>id!==undefined)
+                  )
+                ).join(", ")
+              }`
+            );
 
-          g.on("click", () => {
-            alert(JSON.stringify(block.transactions, null, 2));
-          });
+          g.on("click",()=>{ alert(JSON.stringify(block.transactions,null,2)); });
         });
       });
+
+      const sorted = Object.entries(winCounts)
+        .sort((a,b)=>b[1]-a[1]);
+
+      const list = d3.select("#lb-list");
+      list.selectAll("li").remove();
+      list.selectAll("li")
+        .data(sorted)
+        .enter()
+        .append("li")
+        .text(d=>`Peer ${d[0]}: ${d[1]} wins`);
     }
 
     function fetchAndRender() {
       fetch("/chains")
-        .then(r => r.json())
-        .then(data => renderChains(data));
+        .then(r=>r.json())
+        .then(data=>renderChains(data));
     }
 
-    // startup + periodic refresh
     fetchAndRender();
-    setInterval(fetchAndRender, 10000);
+    setInterval(fetchAndRender,10000);
   </script>
 </body>
 </html>
