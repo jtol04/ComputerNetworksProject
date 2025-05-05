@@ -207,7 +207,7 @@ class Blockchain:
             print("  trying case 2: fork of depth 1 detected")
             if not self._valid(blk, self.chain[-2]):
                 print("  -> case2 invalid")
-                return Falsegit
+                return False
             if blk.header_hash() < tip.header_hash():
                 print("  -> case2 valid & better PoW, reorganize")
                 self.chain[-1] = blk
