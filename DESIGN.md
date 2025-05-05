@@ -26,9 +26,7 @@ Each peer acts as both client and server, connecting to the tracker for matchmak
 ### 3. Demo Application Design
 The Graphical User Interface brings our blockchain protocol to life. Along with periodic updates of each peer's
 local blockchain, we've implemented a leaderboard that keeps track of how many wins each peer has. Furthermore,
-clicking on each block details the transactions (e.g. commit and reveal) that occured for that match. Green blocks indicate a player has won whereas blue blocks indicate a tie. The User Interface demonstrates how all peers have the same local blockchain. Though some may be ahead of the blockchain "race", everyone eventually catches up and stores the same matches at the right order.*
-
-* assuming the right conditions (e.g. all peers initialized right at the same time)
+clicking on each block details the transactions (e.g. commit and reveal) that occured for that match. Green blocks indicate a player has won whereas blue blocks indicate a tie. The User Interface demonstrates how all peers have the same local blockchain. Though some may be ahead of the blockchain "race", everyone eventually catches up and stores the same matches at the right order. (assuming the right conditions (e.g. all peers initialized right at the same time))
 
 ## Architecture
 
