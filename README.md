@@ -25,7 +25,8 @@ An overview of the project's files and directories with brief descriptions:
 
 ### Running peers (one per terminal)
 `python ./peer.py`
-(Btw, it is incredibly crucial that all peer instances are ready before a match starts. Part of our assumptions is that N peers must have joined the server before the first match.)
+
+(Btw, it is incredibly crucial that all peer instances are ready before a match starts. Part of our assumptions is that N peers must have joined the server before the first match. This can be done by having split terminals on VS Code)
 
 ### Running local UI website
 `python ./app.py`
