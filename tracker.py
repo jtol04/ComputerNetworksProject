@@ -1,24 +1,57 @@
+"""
+tracker.py
+
+Tracker server for the Rock-Paper-Scissors blockchain network.
+Handles peer registration, matchmaking, and exposes HTTP endpoints for
+per-peer chain data and match logs via Flask.
+"""
+
 import socket
 import threading
 import json
 import time
-from flask import Flask, jsonify
-from global_vars import TRACKER_PORT
 import random
+
+from flask import Flask, jsonify
+
+from global_vars import TRACKER_PORT
 
 
 flask_app = Flask(__name__)
 
 @flask_app.route('/logs', methods=['GET'])
 def get_logs():
+    """
+    HTTP endpoint to retrieve logs of completed matches.
+
+    Returns:
+        JSON list of match log strings.
+    """
     return jsonify(tracker.match_logs)
 
 @flask_app.route('/chains', methods=['GET'])
 def get_chains():
+    """
+    HTTP endpoint to retrieve each peer's local blockchain data.
+
+    Returns:
+        JSON mapping of peer_id to list of block JSON strings.
+    """
     return jsonify(tracker.per_peer_chains)
 
 class Tracker:
+    """
+    Tracker coordinates peer connections, matchmaking, and
+    collects chain updates and match results.
+    """
     def __init__(self, host='localhost', port=TRACKER_PORT):
+        """
+        Initialize the tracker server state and start matchmaking thread.
+
+        Args:
+            host (str): Address to bind the TCP socket.
+            port (int): Port to bind the TCP socket.
+        """
         self.host = host
         self.port = port
         self.peers = {}
@@ -63,7 +96,14 @@ class Tracker:
 
     def start_match(self, peer1_id, peer2_id, match_id):
         """
-        Start a match between two peers
+        Notify two peers that a match is starting.
+
+        Sends `match_start` messages to both participants.
+
+        Args:
+            peer1_id (int): First peer's ID.
+            peer2_id (int): Second peer's ID.
+            match_id (str): Unique match identifier.
         """
         peer1_data = self.peers[peer1_id]
         peer2_data = self.peers[peer2_id]
@@ -86,7 +126,11 @@ class Tracker:
 
     def send_to_peer(self, peer_id, message):
         """
-        Send a message to a specific peer
+        Send a JSON message to a given peer over its tracking socket.
+
+        Args:
+            peer_id (int): ID of the recipient peer.
+            message (dict): JSON-serializable message.
         """
         self.peers[peer_id]['socket'].sendall(json.dumps(message).encode() + b'\n')
         print(f"Message sent to peer {peer_id}")
@@ -115,7 +159,11 @@ class Tracker:
 
     def handle_new_peer(self, client_socket, address):
         """
-        Handle a new peer connection
+        Register a new peer connection and listen for its messages.
+
+        Args:
+            client_sock (socket.socket): Connected socket.
+            addr (tuple): (host, port) of the peer.
         """
 
         peer_id = self.next_peer_id
@@ -171,7 +219,11 @@ class Tracker:
 
     def handle_peer_message(self, peer_id, message):
         """
-        Handle messages from peers
+        Process messages received from peers.
+
+        Args:
+            peer_id (int): Sender peer ID.
+            message (dict): Parsed JSON message.
         """
         # Store the local blockchain from a peer
         if message['type'] == 'blockchain_update':
@@ -193,7 +245,7 @@ class Tracker:
 
     def start(self):
         """
-        Start the tracker server
+        Start the TCP server to accept new peer connections.
         """
 
         self.socket.bind((self.host, self.port))

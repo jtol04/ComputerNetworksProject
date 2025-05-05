@@ -1,10 +1,31 @@
+"""
+blockchain.py
+
+Core blockchain logic for the Rock-Paper-Scissors application.
+Defines Block and Blockchain classes with PoW mining, validation, and chain reorganization.
+"""
+
 import json
 import time
+
 from utils import sha256, hash_json, pow_ok
 
 class Block:
+    """
+    Represents a single block in the blockchain.
+    """
     def __init__(self, index, prev, transactions, 
                  nonce=0, timestamp=None):
+        """
+        Initialize a new Block.
+
+        Args:
+            index (int): Height of the block in the chain.
+            prev (str): Hash of the previous block's header.
+            transactions (list): List of transaction dictionaries.
+            nonce (int, optional): Proof-of-work nonce. Defaults to 0.
+            timestamp (int, optional): Unix timestamp. Defaults to current time.
+        """
         self.index = index
         self.prev = prev
         self.transactions = transactions
@@ -12,33 +33,54 @@ class Block:
         self.timestamp = timestamp if timestamp is not None else int(time.time())
 
     def header(self):
+        """
+        Return the block header as a dictionary.
+        """
         return {
             "index": self.index,
             "prev": self.prev,
-            # "root": 0,       # add later for merkle
             "transactions": self.transactions,
             "timestamp": self.timestamp,
             "nonce": self.nonce
         }
     
     def header_hash(self):
+        """
+        Compute the SHA-256 hash of the block header.
+        """
         return sha256(json.dumps(self.header(), sort_keys=True).encode())
     
     def mine(self):
+        """
+        Increment nonce until proof-of-work condition is met.
+        """
         while not pow_ok(self.header_hash()):
             self.nonce += 1
     
-    def to_json(self):  return json.dumps({"header": self.header(),
+    def to_json(self):
+        """
+        Serialize the block to a JSON string.
+        """
+        return json.dumps({"header": self.header(),
                                            "transactions": self.transactions})
 
     @staticmethod
     def from_json(js):
+        """
+        Deserialize a JSON string into a Block instance.
+        """
         d = json.loads(js); h = d["header"]
         return Block(h["index"], h["prev"], d["transactions"],
                      h["nonce"], h["timestamp"])
     
 class Blockchain:
+    """
+    Manages the chain of blocks and handles validation and reorganization.
+    """
     def __init__(self):
+        """
+        Create a new Blockchain with a mined genesis block.
+        """
         # starting block
         genesis = Block(
           index=0,
@@ -52,12 +94,28 @@ class Blockchain:
 
     @staticmethod
     def _winner(move_a, move_b):
+        """
+        Determine the winner between two moves.
+
+        Returns:
+            int: 0 for tie, 1 if move_a wins, 2 if move_b wins.
+        """
         if move_a == move_b:
             return 0          # tie
         beats = {"rock":"scissors", "scissors":"paper", "paper":"rock"}
         return 1 if beats[move_a] == move_b else 2
 
     def _valid(self, blk, prev):
+        """
+        Validate a block against its previous block and game rules.
+
+        Args:
+            blk (Block): Block to validate.
+            prev (Block): Previous block in the chain.
+
+        Returns:
+            bool: True if valid, False otherwise.
+        """
         # 1. chain linkage & PoW
         if blk.index != prev.index + 1:        return False
         if blk.prev  != prev.header_hash():    return False
@@ -120,6 +178,12 @@ class Blockchain:
         return True
 
     def add(self, blk):
+        """
+        Attempt to add or reorganize the chain with a new block.
+
+        Returns:
+            bool: True if chain was modified, False otherwise.
+        """
         tip = self.chain[-1]
         prev = blk.prev[:12]
         tip_hash = tip.header_hash()[:12]
@@ -157,7 +221,9 @@ class Blockchain:
 
     # for debugging
     def print_chain(self):
-        """Nicely print every block in the current main chain."""
+        """
+        Nicely print every block in the current main chain.
+        """
         for blk in self.chain:
             print("-"*60)
             print(f"Block #{blk.index}")
@@ -168,6 +234,14 @@ class Blockchain:
         print("-"*60)
     
     # helpers
-    def height(self): return len(self.chain)-1
-    def tip(self):    return self.chain[-1].header_hash()
+    def height(self):
+        """
+        Return the current chain height (last block index).
+        """
+        return len(self.chain)-1
+    def tip(self):
+        """
+        Return the hash of the current tip block.
+        """  
+        return self.chain[-1].header_hash()
 

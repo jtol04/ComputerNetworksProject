@@ -1,16 +1,32 @@
+"""
+peer.py
+
+Peer node logic for the Rock-Paper-Scissors blockchain application.
+Handles network connections, commit-reveal protocol, block proposals,
+and chain synchronization with proof-of-work and fork resolution.
+"""
+
 import secrets
 import socket
 import json
 import threading
 import random
 import time
+
 from blockchain import Blockchain, Block
+
 from utils import sha256, hash_json, pow_ok
 from threading import Condition
 from global_vars import TRACKER_PORT
 
 
 class Peer:
+    """
+    Represents a peer in the RPS blockchain network.
+
+    Manages matchmaking, commit-reveal game protocol,
+    block mining, and network synchronization.
+    """
     # Constants
     CHOICES = ['rock', 'paper', 'scissors']
     OUTCOMES = {
@@ -27,7 +43,11 @@ class Peer:
 
     def __init__(self, host='localhost', tracker_port=TRACKER_PORT):
         """
-        Initialize peer with connection details
+        Initialize the Peer with network settings and blockchain state.
+
+        Args:
+            host (str): Address of the tracker server.
+            tracker_port (int): Port of the tracker server.
         """
         # Network connection properties
         self.host = host
@@ -61,7 +81,12 @@ class Peer:
 
     def _send_once(self, addr, port, obj):
         """
-        Open a short TCP connection, send once JSON message, close.
+        Send a single JSON message over TCP and close the connection.
+
+        Args:
+            addr (str): Destination address.
+            port (int): Destination port.
+            message (dict): JSON message.
         """
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -72,7 +97,10 @@ class Peer:
 
     def _clean_buffer(self, block):
         """
-        Remove transactions from buffer that are already in the blockchain
+        Remove transactions from the buffer that are included in the given block.
+
+        Args:
+            block (Block): Block whose transactions to remove.
         """
         txids_in_block = {(tx.get("match_id", ""), tx.get("type", ""), tx.get("peer", 0))
                           for tx in block.transactions if "type" in tx}
@@ -84,7 +112,7 @@ class Peer:
 
     def handle_peer_connections(self):
         """
-        Thread to handle incoming peer connections (one thread spins up for each peer)
+        Accept incoming peer connections and spawn handler threads.
         """
 
         print(f"Listening for peer messages on port {self.game_port}")
@@ -98,7 +126,10 @@ class Peer:
 
     def handle_peer_message(self, client_socket):
         """
-        Handle a message from another peer
+        Process messages from another peer over a socket.
+
+        Args:
+            client_socket (socket.socket): Connected socket.
         """
         buffer = ""
         while True:
